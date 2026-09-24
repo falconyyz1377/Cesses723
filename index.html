@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Онлайн Шахматы</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; background: #222; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+        h1 { margin-bottom: 15px; }
+        .controls { margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+        button, input { padding: 10px 15px; border-radius: 5px; border: none; font-size: 16px; }
+        button { background: #4CAF50; color: white; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #45a049; }
+        input { width: 140px; text-align: center; }
+        #status { margin-bottom: 15px; font-weight: bold; color: #ffca28; }
+        #board { display: grid; grid-template-columns: repeat(8, 60px); grid-template-rows: repeat(8, 60px); border: 4px solid #444; }
+        .cell { width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 40px; cursor: pointer; user-select: none; }
+        .white { background: #eeeed2; color: #000; }
+        .black { background: #769656; color: #000; }
+        .selected { background: #baca44 !important; }
+    </style>
+    <!-- Подключение PeerJS с нескольких серверов для надежности -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+</head>
+<body>
+
+    <h1>Шахматы Онлайн</h1>
+
+    <div class="controls">
+        <button onclick="createRoom()">Создать Онлайн</button>
+        <input type="text" id="roomId" placeholder="Код комнаты">
+        <button onclick="joinRoom()">Войти</button>
+    </div>
+
+    <div id="status">Выберите режим игры</div>
+    <div id="board"></div>
+
+    <script>
+        const initialBoard = [
+            ['♜','♞','♝','♛','♚','♝','♞','♜'],
+            ['♟','♟','♟','♟','♟','♟','♟','♟'],
+            ['','','','','','','',''],
+            ['','','','','','','',''],
+            ['','','','','','','',''],
+            ['','','','','','','',''],
+            ['♙','♙','♙','♙','♙','♙','♙','♙'],
+            ['♖','♘','♗','♕','♔','♗','♘','♖']
+        ];
+
+        let boardState = JSON.parse(JSON.stringify(initialBoard));
+        let selectedCell = null;
+        let peer = null;
+        let conn = null;
+        let myColor = 'white';
+        let turn = 'white';
+
+        function renderBoard() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = `cell ${(r + c) % 2 === 0 ? 'white' : 'black'}`;
+                    if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
+                        cell.classList.add('selected');
+                    }
+                    cell.innerText = boardState[r][c];
+                    cell.onclick = () => handleCellClick(r, c);
+                    boardEl.appendChild(cell);
+                }
+            }
+        }
+
+        function handleCellClick(r, c) {
+            if (conn && turn !== myColor) {
+                document.getElementById('status').innerText = 'Сейчас ход соперника!';
+                return;
+            }
+
+            if (selectedCell) {
+                const piece = boardState[selectedCell.r][selectedCell.c];
+                boardState[r][c] = piece;
+                boardState[selectedCell.r][selectedCell.c] = '';
+                
+                if (conn) {
+                    conn.send({ type: 'move', from: selectedCell, to: { r, c }, board: boardState });
+                    turn = myColor === 'white' ? 'black' : 'white';
+                    document.getElementById('status').innerText = 'Ход сделан. Ожидание соперника...';
+                }
+                
+                selectedCell = null;
+                renderBoard();
+            } else if (boardState[r][c] !== '') {
+                selectedCell = { r, c };
+                renderBoard();
+            }
+        }
+
+        function generateCode() {
+            return Math.floor(1000 + Math.random() * 9000).toString();
+        }
+
+        function initPeer(id) {
+            if (typeof Peer === 'undefined') {
+                alert('Ошибка загрузки библиотеки сети. Проверьте интернет-соединение.');
+                return;
+            }
+            peer = new Peer(id);
+
+            peer.on('open', (peerId) => {
+                document.getElementById('status').innerText = `Комната создана! Ваш код: ${peerId}`;
+            });
+
+            peer.on('connection', (c) => {
+                conn = c;
+                myColor = 'white';
+                document.getElementById('status').innerText = 'Игрок подключился! Вы играете Белыми.';
+                setupConnection();
+            });
+
+            peer.on('error', (err) => {
+                console.error(err);
+                document.getElementById('status').innerText = 'Ошибка подключения к серверу.';
+            });
+        }
+
+        function createRoom() {
+            const code = generateCode();
+            document.getElementById('roomId').value = code;
+            initPeer(code);
+        }
+
+        function joinRoom() {
+            const code = document.getElementById('roomId').value.trim();
+            if (!code) {
+                alert('Введите код комнаты!');
+                return;
+            }
+            peer = new Peer();
+            peer.on('open', () => {
+                conn = peer.connect(code);
+                myColor = 'black';
+                document.getElementById('status').innerText = 'Подключение к комнате...';
+                setupConnection();
+            });
+        }
+
+        function setupConnection() {
+            conn.on('open', () => {
+                document.getElementById('status').innerText = `Игра началась! Вы играете за ${myColor === 'white' ? 'Белых' : 'Черных'}.`;
+            });
+
+            conn.on('data', (data) => {
+                if (data.type === 'move') {
+                    boardState = data.board;
+                    turn = myColor;
+                    document.getElementById('status').innerText = 'Ваш ход!';
+                    renderBoard();
+                }
+            });
+        }
+
+        renderBoard();
+    </script>
+</body>
+</html>
